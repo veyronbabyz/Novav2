@@ -1,10 +1,10 @@
 name: Build Nova AI APK
 
 'on':
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,23 +24,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Locate and install Android SDK packages
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager 2>/dev/null | head -n 1)"
+            if [ -z "$SDKMANAGER" ]; then
+              echo "sdkmanager was not found on this GitHub runner."
+              exit 1
+            fi
+            echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          fi
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Unpack Nova AI source ZIP
+        run: |
+          if [ ! -f "NovaAI-Real-Android-Source.zip" ]; then
+            echo "Upload NovaAI-Real-Android-Source.zip to the repository root first."
+            exit 1
+          fi
+          unzip -o "NovaAI-Real-Android-Source.zip" -d source
 
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle -p source/NovaAI-Real-Android assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: NovaAI-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: source/NovaAI-Real-Android/app/build/outputs/apk/debug/app-debug.apk
           
