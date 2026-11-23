@@ -24,48 +24,74 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # This action installs the Android command-line tools and accepts
+      # the Android SDK licences. Do not run sdkmanager --licenses again.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 'latest'
+          accept-android-sdk-licenses: true
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
-      - name: Accept Android SDK licenses and install packages
+      # If the repository contains only the source ZIP, extract it.
+      - name: Extract uploaded Android project ZIP if needed
         shell: bash
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          if ! find . -maxdepth 6 -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit | grep -q .; then
+            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit)"
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Extracting $ZIP_FILE"
+              mkdir -p extracted-project
+              unzip -oq "$ZIP_FILE" -d extracted-project
+            fi
+          fi
 
       - name: Locate Android project
         id: project
         shell: bash
         run: |
-          if [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [ -f "NovaAI-Real-Android/settings.gradle" ] || [ -f "NovaAI-Real-Android/settings.gradle.kts" ]; then
-            echo "dir=NovaAI-Real-Android" >> "$GITHUB_OUTPUT"
-          else
-            echo "Could not find the Android Gradle project."
-            echo "Make sure the ZIP was extracted and its project files are uploaded, not just the ZIP file."
+          PROJECT_FILE="$(find . -maxdepth 8 -type f \( -name settings.gradle -o -name settings.gradle.kts \) -not -path './.git/*' -print -quit)"
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: No settings.gradle or settings.gradle.kts found."
+            echo "Upload the extracted Android project files or a ZIP containing the complete Gradle project."
             find . -maxdepth 5 -type f | sort | head -200
             exit 1
           fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_FILE")"
+          echo "Android project directory: $PROJECT_DIR"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Build debug APK
         shell: bash
         run: |
           cd "${{ steps.project.outputs.dir }}"
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          else
-            echo "gradlew is missing. The Android project should include its Gradle wrapper."
+
+          if [ ! -f "gradlew" ]; then
+            echo "ERROR: gradlew is missing from the Android project."
+            echo "The project ZIP must include the Gradle wrapper (gradlew and gradle/wrapper files)."
             exit 1
           fi
 
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Show generated APK files
+        if: success()
+        shell: bash
+        run: |
+          find "${{ steps.project.outputs.dir }}" -type f -path '*/build/outputs/apk/*/*.apk' -print
+
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: NovaAI-debug-apk
           path: |
-            **/build/outputs/apk/debug/*.apk
+            ${{ steps.project.outputs.dir }}/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
           
