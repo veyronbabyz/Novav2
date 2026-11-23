@@ -24,20 +24,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Find Android SDK manager and install packages
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses and install packages
         shell: bash
         run: |
-          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          SDKMANAGER="$(find "$SDK_ROOT" -type f -name sdkmanager 2>/dev/null | head -n 1)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "Could not find sdkmanager under $SDK_ROOT"
-            exit 1
-          fi
-          SDKMANAGER_DIR="$(dirname "$SDKMANAGER")"
-          echo "$SDKMANAGER_DIR" >> "$GITHUB_PATH"
-          export PATH="$SDKMANAGER_DIR:$PATH"
-          yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Locate Android project
         id: project
@@ -45,26 +39,25 @@ jobs:
         run: |
           if [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ]; then
             echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [ -f "app/settings.gradle" ] || [ -f "app/settings.gradle.kts" ]; then
-            echo "dir=app" >> "$GITHUB_OUTPUT"
           elif [ -f "NovaAI-Real-Android/settings.gradle" ] || [ -f "NovaAI-Real-Android/settings.gradle.kts" ]; then
             echo "dir=NovaAI-Real-Android" >> "$GITHUB_OUTPUT"
-          elif [ -f "NovaAI-Real-Android/app/settings.gradle" ] || [ -f "NovaAI-Real-Android/app/settings.gradle.kts" ]; then
-            echo "dir=NovaAI-Real-Android/app" >> "$GITHUB_OUTPUT"
           else
-            echo "Could not find settings.gradle or settings.gradle.kts. Check that the Android project files are uploaded and extracted into the repository."
-            find . -maxdepth 4 -type f | sort | head -200
+            echo "Could not find the Android Gradle project."
+            echo "Make sure the ZIP was extracted and its project files are uploaded, not just the ZIP file."
+            find . -maxdepth 5 -type f | sort | head -200
             exit 1
           fi
 
       - name: Build debug APK
+        shell: bash
         run: |
           cd "${{ steps.project.outputs.dir }}"
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            ./gradlew assembleDebug
+            ./gradlew --no-daemon assembleDebug
           else
-            gradle assembleDebug
+            echo "gradlew is missing. The Android project should include its Gradle wrapper."
+            exit 1
           fi
 
       - name: Upload APK
@@ -74,4 +67,5 @@ jobs:
           path: |
             **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 7
           
